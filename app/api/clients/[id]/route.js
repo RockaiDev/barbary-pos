@@ -2,6 +2,13 @@ import connectMongoDB from "@/libs/mongoose"
 import Client from "@/models/clients"
 import { NextResponse } from "next/server"
 
+export async function GET(req, { params }) {
+    const { id } = params
+    await connectMongoDB()
+    const client = await Client.findById(id)
+    return NextResponse.json(client, { status: 200 })
+}
+
 export async function PUT(req, { params }) {
     const { id } = params
     const { name, phone, address, delivery, orders, points } = await req.json()
