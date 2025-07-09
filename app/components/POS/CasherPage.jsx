@@ -4,22 +4,14 @@ import React, { useState, useEffect } from 'react'
 import socket from '@/libs/socket'
 
 /**
- * CasherPage Component with Offline Support
+ * CasherPage Component
  * 
  * Features:
- * - Automatic offline storage when internet connection is poor
- * - Network status detection and visual indicators
- * - Automatic upload when connection is restored
- * - Manual upload button for offline data
- * - Periodic network checks every 30 seconds
- * - Visual indicators for offline invoices
- * - Confirmation before closing shift with offline data
- * 
- * Offline Storage:
- * - Invoices and orders are saved to localStorage
- * - Data is automatically uploaded when connection is restored
- * - Users can manually trigger uploads
- * - Offline invoices are visually distinguished with yellow background
+ * - Real-time invoice creation and management
+ * - Web order processing
+ * - Client management with loyalty points
+ * - Expense tracking
+ * - Shift management and reporting
  */
 
 export default function CasherPage({ shift, items, User, clientsFromDB, }) {
@@ -58,237 +50,15 @@ export default function CasherPage({ shift, items, User, clientsFromDB, }) {
     // 1. إضافة متغير حالة لتخزين الفاتورة المختارة
     const [selectedInvoice, setSelectedInvoice] = useState(null);
 
-    // Offline Storage Variables
-    const [isOnline, setIsOnline] = useState(navigator.onLine)
-    const [offlineInvoices, setOfflineInvoices] = useState([])
-    const [offlineOrders, setOfflineOrders] = useState([])
-    const [isUploading, setIsUploading] = useState(false)
-    const [offlineCount, setOfflineCount] = useState(0)
 
-    // Initialize offline storage
-    useEffect(() => {
-        // Load offline data from localStorage
-        const savedOfflineInvoices = localStorage.getItem('offlineInvoices')
-        const savedOfflineOrders = localStorage.getItem('offlineOrders')
-        
-        if (savedOfflineInvoices) {
-            const parsedInvoices = JSON.parse(savedOfflineInvoices)
-            setOfflineInvoices(parsedInvoices)
-            setOfflineCount(parsedInvoices.length)
-        }
-        
-        if (savedOfflineOrders) {
-            const parsedOrders = JSON.parse(savedOfflineOrders)
-            setOfflineOrders(parsedOrders)
-        }
-    }, [])
 
-    // Network status detection
-    useEffect(() => {
-        const handleOnline = () => {
-            setIsOnline(true)
-            setAlert('تم استعادة الاتصال بالإنترنت')
-            // Try to upload offline data
-            uploadOfflineData()
-        }
 
-        const handleOffline = () => {
-            setIsOnline(false)
-            setAlert('انقطع الاتصال بالإنترنت - سيتم حفظ الطلبات محلياً')
-        }
 
-        window.addEventListener('online', handleOnline)
-        window.addEventListener('offline', handleOffline)
 
-        return () => {
-            window.removeEventListener('online', handleOnline)
-            window.removeEventListener('offline', handleOffline)
-        }
-    }, [offlineInvoices, offlineOrders])
 
-    // Periodic network check and auto-upload
-    useEffect(() => {
-        const checkNetworkAndUpload = async () => {
-            if (offlineCount > 0 && isOnline) {
-                const canConnect = await canMakeNetworkRequest()
-                if (canConnect) {
-                    console.log('Network available, attempting to upload offline data...')
-                    uploadOfflineData()
-                }
-            }
-        }
 
-        // Check every 30 seconds
-        const interval = setInterval(checkNetworkAndUpload, 30000)
-        
-        return () => clearInterval(interval)
-    }, [offlineCount, isOnline])
 
-    // Function to save data to localStorage
-    const saveToLocalStorage = (key, data) => {
-        try {
-            localStorage.setItem(key, JSON.stringify(data))
-        } catch (error) {
-            console.error('Error saving to localStorage:', error)
-        }
-    }
 
-    // Function to upload offline data
-    const uploadOfflineData = async () => {
-        if (offlineInvoices.length === 0 && offlineOrders.length === 0) {
-            return
-        }
-
-        setIsUploading(true)
-        setAlert('جاري رفع الطلبات المحفوظة...')
-
-        try {
-            // Upload invoices
-            for (const invoice of offlineInvoices) {
-                try {
-                    const resInvoice = await fetch('/api/invoices', {
-                        method: "POST",
-                        headers: {
-                            "Content-type": "application/json"
-                        },
-                        body: JSON.stringify(invoice)
-                    })
-
-                    if (!resInvoice.ok) {
-                        throw new Error(`Failed to upload invoice: ${resInvoice.status}`)
-                    }
-                } catch (error) {
-                    console.error('Error uploading invoice:', error)
-                    setAlert(`خطأ في رفع الفاتورة: ${error.message}`)
-                    return
-                }
-            }
-
-            // Upload orders
-            for (const order of offlineOrders) {
-                try {
-                    const resOrder = await fetch('/api/orders', {
-                        method: "POST",
-                        headers: {
-                            "Content-type": "application/json"
-                        },
-                        body: JSON.stringify(order)
-                    })
-
-                    if (!resOrder.ok) {
-                        throw new Error(`Failed to upload order: ${resOrder.status}`)
-                    }
-                } catch (error) {
-                    console.error('Error uploading order:', error)
-                    setAlert(`خطأ في رفع الطلب: ${error.message}`)
-                    return
-                }
-            }
-
-            // Update shift with new invoices
-            const allInvoices = [...invoices, ...offlineInvoices]
-            const resShift = await fetch(`/api/shifts/${shift._id}`, {
-                method: "PUT",
-                headers: {
-                    "Content-type": 'application/json'
-                },
-                body: JSON.stringify({ invoices: allInvoices })
-            })
-
-            if (resShift.ok) {
-                // Clear offline data after successful upload
-                setOfflineInvoices([])
-                setOfflineOrders([])
-                setOfflineCount(0)
-                saveToLocalStorage('offlineInvoices', [])
-                saveToLocalStorage('offlineOrders', [])
-
-                // Add uploaded invoices to shift invoices
-                setInvoices(allInvoices)
-                
-                // Update localStorage invoices for shift
-                localStorage.setItem('invoices', JSON.stringify(allInvoices))
-                
-                setAlert(`تم رفع ${offlineInvoices.length} فاتورة و ${offlineOrders.length} طلب بنجاح`)
-                
-                // Reload page to reflect changes
-                setTimeout(() => {
-                    window.location.reload()
-                }, 2000)
-            } else {
-                throw new Error('Failed to update shift')
-            }
-
-        } catch (error) {
-            console.error('Error uploading offline data:', error)
-            setAlert('حدث خطأ في رفع البيانات المحفوظة')
-        } finally {
-            setIsUploading(false)
-        }
-    }
-
-    // Function to clear offline data
-    const clearOfflineData = () => {
-        setOfflineInvoices([])
-        setOfflineOrders([])
-        setOfflineCount(0)
-        saveToLocalStorage('offlineInvoices', [])
-        saveToLocalStorage('offlineOrders', [])
-        setAlert('تم مسح البيانات المحفوظة محلياً')
-    }
-
-    // Function to save invoice offline
-    const saveInvoiceOffline = (invoice, order) => {
-        const offlineInvoice = {
-            ...invoice,
-            offlineId: Date.now(),
-            createdAt: new Date().toISOString()
-        }
-
-        const offlineOrder = {
-            ...order,
-            offlineId: Date.now(),
-            createdAt: new Date().toISOString()
-        }
-
-        const newOfflineInvoices = [...offlineInvoices, offlineInvoice]
-        const newOfflineOrders = [...offlineOrders, offlineOrder]
-
-        setOfflineInvoices(newOfflineInvoices)
-        setOfflineOrders(newOfflineOrders)
-        setOfflineCount(newOfflineInvoices.length)
-
-        saveToLocalStorage('offlineInvoices', newOfflineInvoices)
-        saveToLocalStorage('offlineOrders', newOfflineOrders)
-
-        // Don't add to shift invoices - only store offline
-        // setInvoices(prev => [...prev, offlineInvoice])
-        
-        // Don't update localStorage invoices for shift
-        // const currentInvoices = JSON.parse(localStorage.getItem('invoices') || '[]')
-        // const updatedInvoices = [...currentInvoices, offlineInvoice]
-        // localStorage.setItem('invoices', JSON.stringify(updatedInvoices))
-
-        setAlert(`تم حفظ الفاتورة محلياً (${newOfflineInvoices.length} فاتورة في الانتظار)`)
-    }
-
-    // Function to check if we can make network requests
-    const canMakeNetworkRequest = async () => {
-        try {
-            const controller = new AbortController()
-            const timeoutId = setTimeout(() => controller.abort(), 3000) // 3 second timeout
-            
-            const response = await fetch('/api/invoices', {
-                method: 'HEAD',
-                signal: controller.signal
-            })
-            
-            clearTimeout(timeoutId)
-            return response.ok
-        } catch (error) {
-            return false
-        }
-    }
 
     const FilterdItems = items.filter(item => {
         const matchedCategory = !category || item.category === category
@@ -304,9 +74,7 @@ export default function CasherPage({ shift, items, User, clientsFromDB, }) {
 
     const totalIncome = () => {
         let totalShiftIncome = 0
-        // Include both regular invoices and offline invoices for total calculation
-        const allInvoices = [...invoices, ...offlineInvoices]
-        allInvoices.map((invoice) => {
+        invoices.map((invoice) => {
             totalShiftIncome = totalShiftIncome + invoice.total
         })
         return totalShiftIncome
@@ -314,9 +82,7 @@ export default function CasherPage({ shift, items, User, clientsFromDB, }) {
 
     const totalDiscounts = () => {
         let totalDiscount = 0
-        // Include both regular invoices and offline invoices for total calculation
-        const allInvoices = [...invoices, ...offlineInvoices]
-        allInvoices.map(invoice => {
+        invoices.map(invoice => {
             totalDiscount = totalDiscount + +invoice.discount
         })
         return totalDiscount
@@ -544,56 +310,46 @@ export default function CasherPage({ shift, items, User, clientsFromDB, }) {
                     source: 'cashier'
                 };
                 
-                // Check if we can make network requests
-                const canConnect = await canMakeNetworkRequest();
-                
-                if (canConnect && isOnline) {
-                    // Try to save to database
-                    try {
-                        const resInvoice = await fetch('/api/invoices', {
-                            method: "POST",
-                            headers: {
-                                "Content-type": "application/json"
-                            },
-                            body: JSON.stringify(newInvoice)
-                        });
+                try {
+                    const resInvoice = await fetch('/api/invoices', {
+                        method: "POST",
+                        headers: {
+                            "Content-type": "application/json"
+                        },
+                        body: JSON.stringify(newInvoice)
+                    });
+                    
+                    const resOrder = await fetch('/api/orders', {
+                        method: "POST",
+                        headers: {
+                            "Content-type": "application/json"
+                        },
+                        body: JSON.stringify(newOrder)
+                    });
+                    
+                    if (resInvoice.ok && resOrder.ok) {
+                        // إضافة الفاتورة للقائمة المحلية
+                        let invoicesHandle = [...invoices, newInvoice];
+                        setInvoices(invoicesHandle);
                         
-                        const resOrder = await fetch('/api/orders', {
-                            method: "POST",
-                            headers: {
-                                "Content-type": "application/json"
-                            },
-                            body: JSON.stringify(newOrder)
-                        });
+                        // إضافة فاتورة الكاشير لقائمة فواتير الكاشير
+                        setCashierInvoices(prev => [...prev, newInvoice]);
                         
-                        if (resInvoice.ok && resOrder.ok) {
-                            // إضافة الفاتورة للقائمة المحلية
-                            let invoicesHandle = [...invoices, newInvoice];
-                            setInvoices(invoicesHandle);
-                            
-                            // إضافة فاتورة الكاشير لقائمة فواتير الكاشير
-                            setCashierInvoices(prev => [...prev, newInvoice]);
-                            
-                            setAlert('تم إنشاء فاتورة الكاشير بنجاح');
-                            
-                            // حفظ في localStorage
-                            localStorage.setItem('invoices', JSON.stringify(invoicesHandle));
-                            
-                            // إذا كان عميل توصيل، أضف الطلب للعميل
-                            if (client === 'delivery') {
-                                AddOrderToClient();
-                            }
-                        } else {
-                            throw new Error('Network request failed');
+                        setAlert('تم إنشاء فاتورة الكاشير بنجاح');
+                        
+                        // حفظ في localStorage
+                        localStorage.setItem('invoices', JSON.stringify(invoicesHandle));
+                        
+                        // إذا كان عميل توصيل، أضف الطلب للعميل
+                        if (client === 'delivery') {
+                            AddOrderToClient();
                         }
-                    } catch (error) {
-                        console.log('Network error, saving offline:', error);
-                        // Save offline if network fails
-                        saveInvoiceOffline(newInvoice, newOrder);
+                    } else {
+                        throw new Error('Network request failed');
                     }
-                } else {
-                    // Save offline if no internet connection
-                    saveInvoiceOffline(newInvoice, newOrder);
+                } catch (error) {
+                    console.log('Error creating invoice:', error);
+                    setAlert('حدث خطأ في إنشاء فاتورة الكاشير');
                 }
             } catch (error) {
                 console.log(error);
@@ -644,114 +400,95 @@ export default function CasherPage({ shift, items, User, clientsFromDB, }) {
                     source: 'cashier'
                 };
                 
-                // Check if we can make network requests
-                const canConnect = await canMakeNetworkRequest();
-                
-                if (canConnect && isOnline) {
-                    try {
-                        // حفظ الفاتورة في قاعدة البيانات
-                        const resInvoice = await fetch('/api/invoices', {
-                            method: "POST",
-                            headers: {
-                                "Content-type": "application/json"
-                            },
-                            body: JSON.stringify(newInvoice)
-                        });
-                        
-                        // حفظ الطلب في قاعدة البيانات
-                        const resOrder = await fetch('/api/orders', {
-                            method: "POST",
-                            headers: {
-                                "Content-type": "application/json"
-                            },
-                            body: JSON.stringify(newOrder)
-                        });
-                        
-                        const updatedInvoices = [...invoices, newInvoice];
-                        setInvoices(updatedInvoices);
-                        
-                        // إضافة فاتورة الكاشير لقائمة فواتير الكاشير
-                        setCashierInvoices(prev => [...prev, newInvoice]);
-                        
-                        localStorage.setItem('invoices', JSON.stringify(updatedInvoices));
-                        
-                        const resShift = await fetch(`/api/shifts/${shift._id}`, {
-                            method: "PUT",
-                            headers: {
-                                "Content-type": 'application/json'
-                            },
-                            body: JSON.stringify({ invoices: updatedInvoices })
-                        });
-                        
-                        if (resInvoice.ok && resShift.ok && resOrder.ok) {
-                            // معالجة نظام النقاط إذا كان هناك عميل محدد
-                            if (client === 'delivery' && clientSelected && clientSelected !== 'null') {
-                                try {
-                                    const clientObj = JSON.parse(clientSelected);
-                                    
-                                    // خصم النقاط المستخدمة في الخصم
-                                    if (discount > 0) {
-                                        const pointsUsed = Math.floor(discount * 10); // كل جنيه خصم = 10 نقاط
-                                        await calculateAndUpdateRemainingPoints(pointsUsed);
-                                        // تحديث قاعدة البيانات بعد خصم النقاط
-                                        await updateClientPointsInDatabase(pointsUsed);
-                                    }
-                                    
-                                    // إضافة نقاط جديدة للطلب
-                                    await addPointsToClient(totalPrice);
-                                    
-                                    // تحديث طلبات العميل
-                                    const resClient = await fetch(`/api/clients/${clientObj._id}`, {
-                                        method: "PUT",
-                                        headers: {
-                                            "Content-type": 'application/json'
-                                        },
-                                        body: JSON.stringify({ orders: clientOrders })
-                                    });
-                                    
-                                    if (resClient.ok) {
-                                        setAlert('تم إضافة الطلب للعميل وتحديث النقاط')
-                                        setClientSelected(null)
-                                        setClientOrders([])
-                                        setShowAddClient(false)
-                                        setShowEditClient(false)
-                                        setClientName('')
-                                        setClientPhone('')
-                                        setClientAddress('')
-                                        setClientDelivery(0)
-                                        setClientPoints(0)
-                                    }
-                                } catch (pointsError) {
-                                    console.error('خطأ في معالجة النقاط:', pointsError);
-                                    setAlert('تم إنشاء الفاتورة ولكن حدث خطأ في معالجة النقاط');
+                try {
+                    // حفظ الفاتورة في قاعدة البيانات
+                    const resInvoice = await fetch('/api/invoices', {
+                        method: "POST",
+                        headers: {
+                            "Content-type": "application/json"
+                        },
+                        body: JSON.stringify(newInvoice)
+                    });
+                    
+                    // حفظ الطلب في قاعدة البيانات
+                    const resOrder = await fetch('/api/orders', {
+                        method: "POST",
+                        headers: {
+                            "Content-type": "application/json"
+                        },
+                        body: JSON.stringify(newOrder)
+                    });
+                    
+                    const updatedInvoices = [...invoices, newInvoice];
+                    setInvoices(updatedInvoices);
+                    
+                    // إضافة فاتورة الكاشير لقائمة فواتير الكاشير
+                    setCashierInvoices(prev => [...prev, newInvoice]);
+                    
+                    localStorage.setItem('invoices', JSON.stringify(updatedInvoices));
+                    
+                    const resShift = await fetch(`/api/shifts/${shift._id}`, {
+                        method: "PUT",
+                        headers: {
+                            "Content-type": 'application/json'
+                        },
+                        body: JSON.stringify({ invoices: updatedInvoices })
+                    });
+                    
+                    if (resInvoice.ok && resShift.ok && resOrder.ok) {
+                        // معالجة نظام النقاط إذا كان هناك عميل محدد
+                        if (client === 'delivery' && clientSelected && clientSelected !== 'null') {
+                            try {
+                                const clientObj = JSON.parse(clientSelected);
+                                
+                                // خصم النقاط المستخدمة في الخصم
+                                if (discount > 0) {
+                                    const pointsUsed = Math.floor(discount * 10); // كل جنيه خصم = 10 نقاط
+                                    await calculateAndUpdateRemainingPoints(pointsUsed);
+                                    // تحديث قاعدة البيانات بعد خصم النقاط
+                                    await updateClientPointsInDatabase(pointsUsed);
                                 }
+                                
+                                // إضافة نقاط جديدة للطلب
+                                await addPointsToClient(totalPrice);
+                                
+                                // تحديث طلبات العميل
+                                const resClient = await fetch(`/api/clients/${clientObj._id}`, {
+                                    method: "PUT",
+                                    headers: {
+                                        "Content-type": 'application/json'
+                                    },
+                                    body: JSON.stringify({ orders: clientOrders })
+                                });
+                                
+                                if (resClient.ok) {
+                                    setAlert('تم إضافة الطلب للعميل وتحديث النقاط')
+                                    setClientSelected(null)
+                                    setClientOrders([])
+                                    setShowAddClient(false)
+                                    setShowEditClient(false)
+                                    setClientName('')
+                                    setClientPhone('')
+                                    setClientAddress('')
+                                    setClientDelivery(0)
+                                    setClientPoints(0)
+                                }
+                            } catch (pointsError) {
+                                console.error('خطأ في معالجة النقاط:', pointsError);
+                                setAlert('تم إنشاء الفاتورة ولكن حدث خطأ في معالجة النقاط');
                             }
-                            
-                            setAlert('تم إنشاء فاتورة الكاشير بنجاح')
-                            setItemsInOrder([])
-                            setDiscount(0)
-                            setDelivery(0)
-                            setTaxs(0)
-                            window.print()
                         }
-                    } catch (error) {
-                        console.log('Network error, saving offline:', error);
-                        // Save offline if network fails
-                        saveInvoiceOffline(newInvoice, newOrder);
+                        
+                        setAlert('تم إنشاء فاتورة الكاشير بنجاح')
                         setItemsInOrder([])
                         setDiscount(0)
                         setDelivery(0)
                         setTaxs(0)
                         window.print()
                     }
-                } else {
-                    // Save offline if no internet connection
-                    saveInvoiceOffline(newInvoice, newOrder);
-                    setItemsInOrder([])
-                    setDiscount(0)
-                    setDelivery(0)
-                    setTaxs(0)
-                    window.print()
+                } catch (error) {
+                    console.log('Error creating invoice:', error);
+                    setAlert('حدث خطأ في إنشاء فاتورة الكاشير');
                 }
             } catch (error) {
                 console.log(error);
@@ -858,76 +595,50 @@ const createWebsiteInvoice = async (orderData) => {
             source: 'web'
         };
 
-        // Check if we can make network requests
-        const canConnect = await canMakeNetworkRequest();
-        
-        if (canConnect && isOnline) {
-            try {
-                // إرسال الفاتورة
-                const resInvoice = await fetch('/api/invoices', {
-                    method: "POST",
-                    headers: { "Content-type": "application/json" },
-                    body: JSON.stringify(newInvoice)
-                });
+        try {
+            // إرسال الفاتورة
+            const resInvoice = await fetch('/api/invoices', {
+                method: "POST",
+                headers: { "Content-type": "application/json" },
+                body: JSON.stringify(newInvoice)
+            });
 
-                // إرسال الطلب
-                const resOrder = await fetch('/api/orders', {
-                    method: "POST",
-                    headers: { "Content-type": "application/json" },
-                    body: JSON.stringify(newOrder)
-                });
+            // إرسال الطلب
+            const resOrder = await fetch('/api/orders', {
+                method: "POST",
+                headers: { "Content-type": "application/json" },
+                body: JSON.stringify(newOrder)
+            });
 
-                if (resInvoice.ok && resOrder.ok) {
-                    // حفظ محلي
-                    let invoicesHandle = [...invoices, newInvoice];
-                    setInvoices(invoicesHandle);
-                    setWebInvoices(prev => [...prev, newInvoice]);
-                    localStorage.setItem('invoices', JSON.stringify(invoicesHandle));
-                    setWebOrders(prev => prev.filter(order => order.order !== orderData));
-                    setWebOrderCounter(prev => prev + 1);
-
-                    // معالجة النقاط
-                    if (clientSelected && clientSelected !== 'null') {
-                        try {
-                            const clientObj = JSON.parse(clientSelected);
-
-                            if (newInvoice.discount > 0) {
-                                const pointsUsed = Math.floor(newInvoice.discount * 10);
-                                await calculateAndUpdateRemainingPoints(pointsUsed);
-                                // تحديث قاعدة البيانات بعد خصم النقاط
-                                await updateClientPointsInDatabase(pointsUsed);
-                            }
-
-                            await addPointsToClient(totalPrice);
-                            console.log('تم معالجة النقاط لفاتورة الموقع');
-                        } catch (pointsError) {
-                            console.error('خطأ في معالجة النقاط لفاتورة الموقع:', pointsError);
-                        }
-                    }
-
-                    setAlert('تم إنشاء فاتورة الموقع بنجاح');
-                    setSelectedInvoice(newInvoice);
-                    setItemsInOrder(invoiceItems);
-                    setPayment(newInvoice.payment);
-                    setDelivery(newInvoice.delivery);
-                    setTaxs(newInvoice.taxs);
-                    setClient(newInvoice.client);
-                    setDiscount(newInvoice.discount);
-                    setInvoiceId(newInvoice.id);
-                    setShowInvoice(true);
-                    
-                    // إزالة الطباعة التلقائية - سيتم الطباعة من زرار الطباعة
-                } else {
-                    throw new Error('Network request failed');
-                }
-            } catch (error) {
-                console.log('Network error, saving offline:', error);
-                // Save offline if network fails
-                saveInvoiceOffline(newInvoice, newOrder);
+            if (resInvoice.ok && resOrder.ok) {
+                // حفظ محلي
+                let invoicesHandle = [...invoices, newInvoice];
+                setInvoices(invoicesHandle);
+                setWebInvoices(prev => [...prev, newInvoice]);
+                localStorage.setItem('invoices', JSON.stringify(invoicesHandle));
                 setWebOrders(prev => prev.filter(order => order.order !== orderData));
                 setWebOrderCounter(prev => prev + 1);
-                
-                setAlert('تم حفظ فاتورة الموقع محلياً');
+
+                // معالجة النقاط
+                if (clientSelected && clientSelected !== 'null') {
+                    try {
+                        const clientObj = JSON.parse(clientSelected);
+
+                        if (newInvoice.discount > 0) {
+                            const pointsUsed = Math.floor(newInvoice.discount * 10);
+                            await calculateAndUpdateRemainingPoints(pointsUsed);
+                            // تحديث قاعدة البيانات بعد خصم النقاط
+                            await updateClientPointsInDatabase(pointsUsed);
+                        }
+
+                        await addPointsToClient(totalPrice);
+                        console.log('تم معالجة النقاط لفاتورة الموقع');
+                    } catch (pointsError) {
+                        console.error('خطأ في معالجة النقاط لفاتورة الموقع:', pointsError);
+                    }
+                }
+
+                setAlert('تم إنشاء فاتورة الموقع بنجاح');
                 setSelectedInvoice(newInvoice);
                 setItemsInOrder(invoiceItems);
                 setPayment(newInvoice.payment);
@@ -937,23 +648,14 @@ const createWebsiteInvoice = async (orderData) => {
                 setDiscount(newInvoice.discount);
                 setInvoiceId(newInvoice.id);
                 setShowInvoice(true);
+                
+                // إزالة الطباعة التلقائية - سيتم الطباعة من زرار الطباعة
+            } else {
+                throw new Error('Network request failed');
             }
-        } else {
-            // Save offline if no internet connection
-            saveInvoiceOffline(newInvoice, newOrder);
-            setWebOrders(prev => prev.filter(order => order.order !== orderData));
-            setWebOrderCounter(prev => prev + 1);
-            
-            setAlert('تم حفظ فاتورة الموقع محلياً');
-            setSelectedInvoice(newInvoice);
-            setItemsInOrder(invoiceItems);
-            setPayment(newInvoice.payment);
-            setDelivery(newInvoice.delivery);
-            setTaxs(newInvoice.taxs);
-            setClient(newInvoice.client);
-            setDiscount(newInvoice.discount);
-            setInvoiceId(newInvoice.id);
-            setShowInvoice(true);
+        } catch (error) {
+            console.log('Error creating website invoice:', error);
+            setAlert('حدث خطأ في إنشاء فاتورة الموقع');
         }
     } catch (error) {
         console.log('خطأ في إنشاء فاتورة الموقع:', error);
@@ -1134,25 +836,10 @@ const createWebsiteInvoice = async (orderData) => {
     let status = 'close'
     let close = User.name
     const CloseShift = async () => {
-        // Check if there are offline invoices
-        if (offlineCount > 0) {
-            const uploadConfirmed = confirm(`يوجد ${offlineCount} فاتورة محفوظة محلياً. هل تريد رفعها قبل إغلاق الوردية؟`)
-            if (uploadConfirmed) {
-                await uploadOfflineData()
-            } else {
-                const confirmed = confirm('سيتم فقدان الفواتير المحفوظة محلياً. هل تريد المتابعة؟')
-                if (!confirmed) {
-                    return
-                }
-            }
-        }
-
         const confirmed = confirm('هل تريد اغلاق الوردية؟')
         if (confirmed) {
             setAlert('جاري اغلاق الوردية..')
             localStorage.removeItem('invoices')
-            localStorage.removeItem('offlineInvoices')
-            localStorage.removeItem('offlineOrders')
             try {
                 const res = await fetch(`/api/shifts/${shift._id}`, {
                     method: "PUT",
@@ -1384,14 +1071,11 @@ const createWebsiteInvoice = async (orderData) => {
     useEffect(() => {
         console.log('فصل الفواتير حسب المصدر:', invoices);
         
-        // Combine regular invoices with offline invoices for display
-        const allInvoicesForDisplay = [...invoices, ...offlineInvoices];
-        
-        const cashierInvs = allInvoicesForDisplay.filter(invoice => {
+        const cashierInvs = invoices.filter(invoice => {
             return invoice.source !== 'web';
         });
         
-        const webInvs = allInvoicesForDisplay.filter(invoice => { 
+        const webInvs = invoices.filter(invoice => { 
             return invoice.source === 'web';
         });
         
@@ -1400,7 +1084,7 @@ const createWebsiteInvoice = async (orderData) => {
         
         setCashierInvoices(cashierInvs);
         setWebInvoices(webInvs);
-    }, [invoices, offlineInvoices]);
+    }, [invoices]);
 
 
 
@@ -1790,40 +1474,7 @@ const createWebsiteInvoice = async (orderData) => {
                 <h2 className='text-mainColor text-xs m-2'>قام بفتح الوردية: {shift.casher}</h2>
                 {User.role === "المالك" && <div onClick={() => DeleteShift(shift._id)} className="btn text-xs p-1 bg-red-500 text-bgColor font-bold rounded-lg cursor-pointer">حذف الوردية</div>}
                 
-                {/* Network Status and Offline Upload */}
-                <div className="network-status flex items-center gap-2 m-2">
-                    <div className={`status-indicator w-3 h-3 rounded-full ${isOnline ? 'bg-green-500' : 'bg-red-500'}`}></div>
-                    <span className={`text-xs font-bold ${isOnline ? 'text-green-600' : 'text-red-600'}`}>
-                        {isOnline ? 'متصل بالإنترنت' : 'غير متصل'}
-                    </span>
-                    {offlineCount > 0 && (
-                        <div className="offline-indicator flex items-center gap-1">
-                            <span className="text-xs bg-yellow-500 text-white px-2 py-1 rounded-full font-bold">
-                                {offlineCount} فاتورة في الانتظار
-                            </span>
-                            <button
-                                onClick={uploadOfflineData}
-                                disabled={isUploading || !isOnline}
-                                className={`text-xs px-2 py-1 rounded-full font-bold ${
-                                    isUploading 
-                                        ? 'bg-gray-400 text-white cursor-not-allowed' 
-                                        : !isOnline
-                                        ? 'bg-gray-400 text-white cursor-not-allowed'
-                                        : 'bg-blue-500 text-white hover:bg-blue-600'
-                                }`}
-                            >
-                                {isUploading ? 'جاري الرفع...' : !isOnline ? 'غير متصل' : 'رفع الآن'}
-                            </button>
-                            <button
-                                onClick={clearOfflineData}
-                                className="text-xs px-2 py-1 rounded-full font-bold bg-red-500 text-white hover:bg-red-600"
-                                title="مسح البيانات المحفوظة محلياً"
-                            >
-                                مسح
-                            </button>
-                        </div>
-                    )}
-                </div>
+
             </div>
             <div className="options w-10/12 bg-mainColor p-1 mt-5 rounded-full flex items-center justify-center">
                 <ul className='flex items-center justify-center w-full'>
@@ -1879,14 +1530,7 @@ const createWebsiteInvoice = async (orderData) => {
                     <div className="color w-full p-2 bg-green-500 rounded-full">
                     </div>
                 </div>
-                {offlineCount > 0 && (
-                    <div className="info w-72 h-32 cursor-pointer flex flex-col m-2 items-start justify-between p-4 shadow-xl rounded-xl border bg-yellow-100">
-                        <h2 className='text-2xl font-bold'>فواتير محفوظة</h2>
-                        <h3 className='text-xl text-yellow-600 font-bold'>{offlineCount} فاتورة</h3>
-                        <div className="color w-full p-2 bg-yellow-500 rounded-full">
-                        </div>
-                    </div>
-                )}
+
             </div>
             <div className="orders w-full">
                 {/* أزرار الفلترة */}
@@ -1960,7 +1604,6 @@ const createWebsiteInvoice = async (orderData) => {
                                     setInvoiceId(invoice.id)
                                     setIndexToDelete(ind)
                                 }} className={`invoice cursor-pointer hover:bg-slate-50 hover:border-mainColor border-2 w-full p-2 flex items-center justify-between rounded-xl my-1 ${
-                                    invoice.offlineId ? "bg-yellow-200 border-yellow-500" : 
                                     invoicesFromLocalStorage?.some(localInvoice => localInvoice.id === invoice.id) ? "bg-gray-300" : "bg-red-200"
                                 }`} key={ind}>
                                     <div className="flex items-center gap-3">
@@ -1975,9 +1618,6 @@ const createWebsiteInvoice = async (orderData) => {
                                             <p className='text-sm text-gray-600'>المجموع: {invoice.total} ج.م</p>
                                             <p className='text-sm text-gray-600'>الاصناف: {invoice.items.length} أصناف</p>
                                             <p className='text-sm text-gray-600'>طريقة الدفع: {invoice.payment}</p>
-                                            {invoice.offlineId && (
-                                                <p className='text-xs text-yellow-700 font-bold'>⚠️ محفوظة محلياً</p>
-                                            )}
                                         </div>
                                     </div>
                                     <div className="flex items-center gap-2">
@@ -2315,7 +1955,7 @@ const createWebsiteInvoice = async (orderData) => {
                             </div>
                             <div className="flex items-center justify-between w-full">
                                 <h2 className='text-sm font-bold mb-2'>عدد الطلبات</h2>
-                                <h3 className='text-sm'>{invoices.length + offlineInvoices.length} طلب</h3>
+                                <h3 className='text-sm'>{invoices.length} طلب</h3>
                             </div>
                         </div>
                         <h3 className='text-xl font-bold'>الفواتير خلال الوردية: </h3>
@@ -2327,19 +1967,7 @@ const createWebsiteInvoice = async (orderData) => {
                                 </div>
                             </div>
                         ))}
-                        {offlineInvoices.length > 0 && (
-                            <>
-                                <h3 className='text-xl font-bold text-yellow-600'>الفواتير المحفوظة محلياً: </h3>
-                                {offlineInvoices.map((invoice, ind) => (
-                                    <div key={`offline-${ind}`} className="invoice w-full flex flex-col items-start justify-start my-2 p-2 bg-yellow-50 border-l-4 border-yellow-500">
-                                        <div className="totalInvoice flex items-center justify-between w-full">
-                                            <h2 className='text-base font-semibold mb-2'>{ind + 1} - إجمالي الفاتورة (محفوظة محلياً)</h2>
-                                            <h3 className='text-base'>{invoice.total} L.E</h3>
-                                        </div>
-                                    </div>
-                                ))}
-                            </>
-                        )}
+
                         {expenses.length > 0 && (
                             <>
                                 <h3 className='text-xl font-bold'>المصروفات خلال الوردية: </h3>
